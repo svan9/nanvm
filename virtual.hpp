@@ -86,6 +86,10 @@ namespace Virtual {
   };
 
   #define VIRTUAL_VERSION (Instruction_PUTS*100)+0x55
+  #define NWORD uint
+  // #define NWORD unsigned long long
+  #define SNWORD int
+  // #define SNWORD long long
 
 
   struct CodeManifest {
@@ -312,7 +316,7 @@ namespace Virtual {
       byte in_neib_ctx: 1 = false;
     } flags;                                    // 1byte
     byte _pad0[1];
-    mew::stack<uint, mew::MidAllocator<uint>> stack;                 // 24byte
+    mew::stack<NWORD, mew::MidAllocator<NWORD>> stack;                 // 24byte
     size_t rdi = 0;
     mew::stack<byte *, mew::MidAllocator<byte*>> begin_stack;        // 24byte
     mew::stack<mew::_dll_hinstance, mew::MidAllocator<mew::_dll_hinstance>> hdlls;  // 24byte
@@ -372,6 +376,7 @@ namespace Virtual {
   #endif
   #define __VM_ALIGN(_val, _align) (((int)((_val) / (_align)) + 1) * (_align))
 
+
   void Alloc(VirtualMachine& vm) {
     if (vm.memory != nullptr) {
       free(vm.memory);
@@ -392,7 +397,7 @@ namespace Virtual {
     vm.capacity = size;
   }
 
-  uint DeclareProccessor(VirtualMachine& vm, VM_Processor proc) {
+  NWORD DeclareProccessor(VirtualMachine& vm, VM_Processor proc) {
     MewNotImpl();
     // vm.procs.push_back(proc);
     // return vm.procs.size()-1;
@@ -407,11 +412,11 @@ namespace Virtual {
     }
   }
 
-  void VM_ManualPush(VirtualMachine& vm, uint x) {
+  void VM_ManualPush(VirtualMachine& vm, NWORD x) {
     vm.stack.push(x);
   }
 
-  void VM_Push(VirtualMachine& vm, byte head_byte, uint number) {
+  void VM_Push(VirtualMachine& vm, byte head_byte, NWORD number) {
     switch (head_byte) {
       case 0:
       case Instruction_FLT:
@@ -421,7 +426,7 @@ namespace Virtual {
       case Instruction_MEM: {
         MewUserAssert(vm.heap+number < vm.end, "out of memory");
         byte* pointer = vm.heap+number;
-        uint x; memcpy(&x, pointer, sizeof(x));
+        NWORD x; memcpy(&x, pointer, sizeof(x));
         vm.stack.push(x, vm.rdi);
       } break;
       case Instruction_REG: {
@@ -449,17 +454,17 @@ namespace Virtual {
       case 0:
       case Instruction_FLT:
       case Instruction_NUM: {
-        uint number = 0;
+        NWORD number = 0;
         memcpy(&number, vm.begin, sizeof(number));
         vm.stack.push(number);
         vm.begin += sizeof(number);
       } break;
       case Instruction_MEM: {
-        uint number = 0;
+        NWORD number = 0;
         memcpy(&number, vm.begin, sizeof(number));
         MewUserAssert(vm.heap+number < vm.end, "out of memory");
         byte* pointer = vm.heap+number;
-        uint x; memcpy(&x, pointer, sizeof(x));
+        NWORD x; memcpy(&x, pointer, sizeof(x));
         vm.stack.push(x, vm.rdi);
         vm.begin += sizeof(number);
       } break;
@@ -467,9 +472,9 @@ namespace Virtual {
         size_t size;
         byte* reg = VM_GetReg(vm, &size);
         MewUserAssert(reg != nullptr, "invalid register");
-        vm.stack.push((uint)*reg, vm.rdi);
+        vm.stack.push((NWORD)*reg, vm.rdi);
         if (size == 8) {
-          vm.stack.push((uint)*(reg+sizeof(uint)), vm.rdi);
+          vm.stack.push((NWORD)*(reg+sizeof(NWORD)), vm.rdi);
         }
       } break;
       case Instruction_ST: {
@@ -495,8 +500,8 @@ namespace Virtual {
     size_t size;
     byte* reg = VM_GetReg(vm, &size);
     if (size == 4) {
-      uint value = vm.stack.pop();
-      memcpy(reg, &value, sizeof(uint));
+      NWORD value = vm.stack.pop();
+      memcpy(reg, &value, sizeof(NWORD));
     } else
     if (size == 8) {
       long long value = vm.stack.npop<long long>();
@@ -504,20 +509,20 @@ namespace Virtual {
     }
   }
   
-  void VM_StackTop(VirtualMachine& vm, byte type, uint* x, byte** mem = nullptr) {
+  void VM_StackTop(VirtualMachine& vm, byte type, NWORD* x, byte** mem = nullptr) {
     switch (type) {
       case 0:
       case Instruction_FLT:
       case Instruction_ST:
       case Instruction_NUM: {
         MewUserAssert(!vm.stack.empty(), "stack is empty");
-        uint _top = vm.stack.top(vm.rdi);
+        NWORD _top = vm.stack.top(vm.rdi);
         memmove(x, &_top, sizeof(_top));
       } break;
       case Instruction_MEM: {
         MewUserAssert(!vm.stack.empty(), "stack is empty");
-        uint _top = vm.stack.top(vm.rdi);
-        uint offset = _top;
+        NWORD _top = vm.stack.top(vm.rdi);
+        NWORD offset = _top;
         MewUserAssert(vm.heap+offset < vm.end, "out of memory");
         byte* pointer = vm.heap+offset;
         if (mem != nullptr) {
@@ -553,12 +558,12 @@ namespace Virtual {
     VM_ManualCall(vm, lib_idx, fname);
   }
 
-  void VM_MathBase(VirtualMachine& vm, uint* x, uint* y, byte** mem = nullptr) {
+  void VM_MathBase(VirtualMachine& vm, NWORD* x, NWORD* y, byte** mem = nullptr) {
     byte type_x = *vm.begin++;
     byte type_y = *vm.begin++;
-    vm.rdi += sizeof(uint);
+    vm.rdi += sizeof(NWORD);
     VM_StackTop(vm, type_x, x, mem);
-    vm.rdi -= sizeof(uint);
+    vm.rdi -= sizeof(NWORD);
     VM_StackTop(vm, type_y, y);
   }
 
@@ -903,7 +908,7 @@ namespace Virtual {
     a >> b;
   }
   
-  void VM_ManualJmp(VirtualMachine& vm, int offset) {
+  void VM_ManualJmp(VirtualMachine& vm, NWORD offset) {
     MewUserAssert(MEW_IN_RANGE(vm.memory, vm.end, vm.begin+offset), 
       "out of memory");
     // vm.begin_stack.push(vm.begin);
@@ -913,8 +918,8 @@ namespace Virtual {
   
   void VM_Jmp(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    int offset;
-    memcpy(&offset, vm.begin, sizeof(int)); //vm.begin += sizeof(int);
+    NWORD offset;
+    memcpy(&offset, vm.begin, sizeof(NWORD)); //vm.begin += sizeof(int);
     MewUserAssert(MEW_IN_RANGE(vm.memory, vm.end, vm.begin+offset), 
       "out of memory");
     // vm.begin_stack.push(vm.begin);
@@ -933,9 +938,9 @@ namespace Virtual {
 
   void VM_Test(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    int x, y;
+    NWORD x, y;
     vm.test = {0};
-    VM_MathBase(vm, (uint*)&x, (uint*)&y);
+    VM_MathBase(vm, (NWORD*)&x, (NWORD*)&y);
     int result = memcmp(&x, &y, sizeof(x));
     if (result > 0) {
       vm.test.more = 1;
@@ -1023,9 +1028,9 @@ namespace Virtual {
 
   void VM_MSet(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    uint x; /* start */
-    uint y; /* size  */
-    uint z; /* value */
+    NWORD x; /* start */
+    NWORD y; /* size  */
+    NWORD z; /* value */
     memcpy(&x, vm.begin, sizeof(x)); vm.begin += sizeof(x);
     memcpy(&y, vm.begin, sizeof(y)); vm.begin += sizeof(y);
     memcpy(&z, vm.begin, sizeof(z)); vm.begin += sizeof(z);
@@ -1052,10 +1057,12 @@ namespace Virtual {
 
   void VM_Puts(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    uint offset;
-    memcpy(&offset, vm.begin, sizeof(uint)); vm.begin+=sizeof(uint);
-    uint fls;
-    memcpy(&fls, vm.begin, sizeof(uint)); vm.begin+=sizeof(uint);
+    NWORD offset;
+    memcpy(&offset, vm.begin, sizeof(NWORD)); vm.begin+=sizeof(NWORD);
+    NWORD fls = 0;
+    if (!vm.libs.empty()) {
+      memcpy(&fls, vm.begin, sizeof(NWORD)); vm.begin+=sizeof(NWORD);
+    }
     byte* heap;
     if (fls == 0) {
       heap = vm.heap;
@@ -1086,8 +1093,8 @@ namespace Virtual {
 
   void VM_Open(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    uint offset;
-    memcpy(&offset, vm.begin, sizeof(uint)); vm.begin+=sizeof(uint);
+    NWORD offset;
+    memcpy(&offset, vm.begin, sizeof(NWORD)); vm.begin+=sizeof(NWORD);
     MewUserAssert(vm.heap+offset < vm.end, "out of memory");
     byte* pointer = vm.heap+offset;
     char* begin = (char*)pointer;
@@ -1103,7 +1110,7 @@ namespace Virtual {
     bool use_stack;
     memcpy(&use_stack, vm.begin++, sizeof(use_stack));
     if (use_stack) {
-      VM_StackTop(vm, *vm.begin++, (uint*)&idx);
+      VM_StackTop(vm, *vm.begin++, (NWORD*)&idx);
     } else {
       memcpy(&idx, vm.begin, sizeof(idx)); vm.begin+=sizeof(idx);
     }
@@ -1112,8 +1119,8 @@ namespace Virtual {
   
   void VM_Write(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    uint offset;
-    memcpy(&offset, vm.begin, sizeof(uint)); vm.begin+=sizeof(uint);
+    NWORD offset;
+    memcpy(&offset, vm.begin, sizeof(NWORD)); vm.begin+=sizeof(NWORD);
     MewUserAssert(vm.heap+offset < vm.end, "out of memory");
     byte* pointer = vm.heap+offset;
     fputs((char*)pointer, vm.r_stream);
@@ -1121,8 +1128,8 @@ namespace Virtual {
   
   void VM_Read(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    uint offset;
-    memcpy(&offset, vm.begin, sizeof(uint)); vm.begin+=sizeof(uint);
+    NWORD offset;
+    memcpy(&offset, vm.begin, sizeof(NWORD)); vm.begin+=sizeof(NWORD);
     MewUserAssert(vm.heap+offset < vm.end, "out of memory");
     byte* pointer = vm.heap+offset;
     short int chunk_size;
@@ -1279,6 +1286,9 @@ namespace Virtual {
       ++vm.process_cycle; RunLine(vm);
     }
     vm.status = VM_Status_Panding;
+    if (vm.stack.empty()) {
+      return 0;
+    }
     return vm.stack.top();
   }
 
@@ -1439,12 +1449,13 @@ namespace Virtual {
       cb.code[cb.size++] = i;
       return cb;
     } 
-    friend CodeBuilder& operator<<(CodeBuilder& cb, uint i) {
+    friend CodeBuilder& operator<<(CodeBuilder& cb, NWORD i) {
       cb.UpsizeIfNeeds(sizeof(i));
       memcpy(cb.code+cb.size, &i, sizeof(i));
       cb.size += sizeof(i);
       return cb;
     }
+
     friend CodeBuilder& operator<<(CodeBuilder& cb, Instruction i) {
       cb.UpsizeIfNeeds(sizeof(i));
       cb.code[cb.size++] = i;
@@ -1497,7 +1508,7 @@ namespace Virtual {
     }
 
     byte* at(int idx) {
-      uint real_idx = (size + idx) % size;
+      NWORD real_idx = (size + idx) % size;
       MewAssert(real_idx < size);
       return (code+real_idx);
     }
@@ -1506,7 +1517,7 @@ namespace Virtual {
       return at(idx);
     }
 
-    void force_data(uint _size) {
+    void force_data(NWORD _size) {
       byte* _ndata = new byte[_data_size+_size];
       memcpy(_ndata, data, _data_size);
       _data_size += _size;
@@ -1514,6 +1525,12 @@ namespace Virtual {
     }
     
   };
+
+  constexpr size_t GetVersion() {
+    return VIRTUAL_VERSION;
+  }
+
+  #undef VIRTUAL_VERSION
 #pragma pack(pop)
 }
 namespace Tests {
@@ -1522,7 +1539,7 @@ namespace Tests {
       using namespace Virtual;
       CodeBuilder builder;
       builder << Instruction_PUTS;
-      builder << 0U;
+      builder << (NWORD)0U;
       builder << Instruction_EXIT;
       builder += "hellow word";
       Code* code = *builder;

@@ -1,9 +1,9 @@
-#define MEW_NOTUSE_THROWS
+// #define MEW_NOTUSE_THROWS
 #include <iostream>
 #include "mewall.h"
 #include "virtual.hpp"
-#include "nan.hpp"
-#if defined(_WIN32)
+#include "mewcolors.hpp"
+#ifdef _WIN32
 
 #include <windows.h>
 #include <libloaderapi.h>
@@ -24,9 +24,13 @@ using namespace std;
 
 #define HELP_PAGE \
 	"Usage:\n" \
-	"> ./nanvm <path/to/file>\n" \
+	Italic BRIGHT("> ./nanvm <path/to/file>\n") \
 	"Flags:\n" \
-	"-h, --help\t\tShow this help page\n" 
+	Italic BRIGHT(\
+		"-h, --help\tShow this help page\n" \
+		"--version\tDisplay current vm version\n"\
+		"--get_test\tGenerate hellow word file\n"\
+	) 
 
 int main(int argc, char** argv) {
 	mew::args __args(argc, argv);
@@ -38,6 +42,20 @@ int main(int argc, char** argv) {
 		__args.has("--help")
 	) {
 		printf(HELP_PAGE); exit(0);
+	}
+
+	if (__args.has("--version") || __args.has("--versions")) {
+		printf(
+			"NAN VIRTUAL MACHINE version '%ld'\n"
+			Italic BRIGHT(
+				"  prod by 'nansotu studio'(C) dev so2u\n"
+			)
+			, Virtual::GetVersion());
+		exit(0);
+	}
+
+	if (__args.has("--get_test")) {
+		return !Tests::test_Virtual();
 	}
 
 	const char* path = __args.getNextPath();
