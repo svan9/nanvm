@@ -1,0 +1,8 @@
+[
+{
+  "directory": "E:/so2u/GITHUB/cuba/nan/nanvm/build",
+  "command": "E:\\progs\\libs\\Msys32\\ucrt64\\bin\\g++.exe -DWINDOWS_OS -IE:/so2u/GITHUB/cuba/nan/nanvm/mewlib -IE:/so2u/GITHUB/cuba/nan/nanvm/. -g -std=c++20 -fconcepts -fpermissive -fopenmp -o CMakeFiles\\nanvm.dir\\main.cpp.obj -c E:\\so2u\\GITHUB\\cuba\\nan\\nanvm\\main.cpp",
+  "file": "E:\\so2u\\GITHUB\\cuba\\nan\\nanvm\\main.cpp",
+  "output": "CMakeFiles\\nanvm.dir\\main.cpp.obj"
+}
+]
