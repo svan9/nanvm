@@ -15,7 +15,7 @@ add_compile_options(-fopenmp)
 
 aux_source_directory("./" SOURCE)
 add_executable(${PROJECT_NAME} ${SOURCE})
-target_include_directories(${PROJECT_NAME} PUBLIC "./" PUBLIC "./mewlib")
+target_include_directories(${PROJECT_NAME} PUBLIC "./")
 set_target_properties(${PROJECT_NAME} PROPERTIES COMMON_LANGUAGE_RUNTIME "")
 find_package(OpenMP)
 

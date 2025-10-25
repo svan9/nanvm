@@ -111,20 +111,15 @@ ZERO BYTE
 	SWAP <ARG> <ARG>
 ### MSET
 	MSET <start> <size> <value>
-### SWST
-	SWST <USE_STACK:BYTE> <value?>
-	SWST <TRUE> -NUMBER:STACK-
-	SWST <FALSE> <NUMBER>
-sets current stream
 ### WRITE
-	WRITE <OFFSET:HEAP>
-write from heap to current stream
+	WRITE <OFFSET:PATH> <OFFSET:SRC>
+write to file from path
 ### READ
-	READ <OFFSET:HEAP> <CHUNK_SIZE>
-read from current stream to heap
-### OPEN
-	OPEN <OFFSET:HEAP> <FLAGS:INT>
-opens file with flag by path and return dest into the stack
+	READ <OFFSET:PATH> <OFFSET:DEST>
+read from file to DEST & push into stack top file size
+### WINE
+	WINE <OFFSET:PATH>
+create file by path if not exists
 ### GETCH
 	GETCH <ARG>
 wait pressed char and write into arg
