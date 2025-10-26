@@ -183,7 +183,7 @@ namespace Virtual {
     u8 type: 1;
     const char* lib_name;
     const char* func_name;
-  }; 
+  };
 
   struct CodeManifestExtended {
     VM_MANIFEST_FLAGS flags;
@@ -200,6 +200,20 @@ namespace Virtual {
 
 #pragma region FILE
 
+  void Code_WriteDebug(std::ofstream& file, FuncExternalLink& link) {
+    file << link.type;
+    mew::writeString(file, link.lib_name);
+    mew::writeString(file, link.func_name);
+  }
+
+  FuncExternalLink Code_ReadDebug(std::ifstream& file) {
+    FuncExternalLink link;
+    file >> link.type;
+    mew::readString(file, (char*)link.lib_name);
+    mew::readString(file, (char*)link.func_name);
+    return link;
+  }
+
   void Code_SaveToFile(const Code& code, std::ofstream& file) {
     /* manifest */
     VM_MANIFEST_FLAGS mflags = code.cme.flags;
@@ -208,6 +222,10 @@ namespace Virtual {
     /* data */
     mew::writeArray(file, code.playground, code.capacity);
     mew::writeArray(file, code.data, code.data_size);
+    /* debug */
+    if (mflags.has_debug) {
+      mew::writeStack(file, code.cme.extern_links, Code_WriteDebug);
+    }
   }
 
   void Code_SaveToFile(const Code& code, const std::filesystem::path& path) {
@@ -240,6 +258,10 @@ namespace Virtual {
     /* data */
     code->capacity = mew::readArray(file, code->playground);
     code->data_size = mew::readArray(file, code->data);
+    /* debug */
+    if (code->cme.flags.has_debug) {
+      mew::readStack(file, code->cme.extern_links, Code_ReadDebug);
+    }
     return code;
   }
 
@@ -1531,20 +1553,32 @@ namespace Virtual {
     };
     static const u64 alloc_size = 8;
   private:
-    u64 capacity, size, _data_size = 0;
+    u64 capacity, _code_size, _data_size = 0;
     mew::stack<u64> _adatas;
     byte* code = nullptr, *data = nullptr;
     u64 stack_head = 0;
   public:
-    CodeBuilder(): capacity(alloc_size), size(0), 
+    CodeBuilder(): capacity(alloc_size), _code_size(0), 
       code((byte*)realloc(NULL, alloc_size)), _data_size(0) { memset(code, 0, alloc_size); }
 
+    CodeBuilder(Code* code)
+      : capacity(code->capacity), 
+        _code_size(code->capacity), 
+        _data_size(code->data_size), 
+        code(code->playground),
+        data(code->data)
+      { }
+    
+    byte* GetData() const noexcept {
+      return data;
+    }
+
     inline u64 code_size() const noexcept {
-      return size;
+      return _code_size;
     }
 
     inline u64 cursor() const noexcept {
-      return size;
+      return _code_size;
     }
 
     inline u64 data_size() const noexcept {
@@ -1559,6 +1593,41 @@ namespace Virtual {
         << Instruction_STRUCT
         << sizeof(value);
       insert(value);
+      return cursor();
+    }
+
+    inline u64 putAtCode(u64 idx, byte* val, u64 _size) {
+      MewUserAssert(idx+_size <= _code_size, "out of code");
+      memcpy(code, val, _size);
+      return cursor();
+    }
+
+    inline u64 putAtCode(u64 idx, u64 val) {
+      MewUserAssert(idx+sizeof(val) <= _code_size, "out of code");
+      memcpy(code, &val, sizeof(val));
+      return cursor();
+    }
+    
+    inline u64 insertAtCode(u64 idx, byte* val, u64 size) {
+      u8* buffer = new u8[size+_code_size];
+      memcpy(buffer, code, idx);
+      memcpy(buffer+idx, val, size);
+      memcpy(buffer+idx+size, code+idx, _code_size - idx);
+      delete code;
+      code = buffer;
+      _code_size += size;
+      return cursor();
+    }
+    
+    inline u64 putAtData(u64 idx, byte* val, u64 _size) {
+      MewUserAssert(idx+_size <= _data_size, "out of data");
+      memcpy(data, val, _size);
+      return _data_size;
+    }
+
+    inline u64 putAtData(u64 idx, u64 val) {
+      MewUserAssert(idx+sizeof(val) <= _data_size, "out of data");
+      memcpy(data, &val, sizeof(val));
       return cursor();
     }
 
@@ -1606,7 +1675,7 @@ namespace Virtual {
     }
     
     void UpsizeIfNeeds(u64 needs_size) {
-      if (size+needs_size > capacity) {
+      if (_code_size+needs_size > capacity) {
         Upsize(needs_size);
       }
     }
@@ -1625,62 +1694,62 @@ namespace Virtual {
 
     friend CodeBuilder& operator<<(CodeBuilder& cb, byte i) {
       cb.UpsizeIfNeeds(sizeof(i));
-      cb.code[cb.size++] = i;
+      cb.code[cb._code_size++] = i;
       return cb;
     } 
 
     friend CodeBuilder& operator<<(CodeBuilder& cb, u32 i) {
       cb.UpsizeIfNeeds(sizeof(i));
-      memcpy(cb.code+cb.size, &i, sizeof(i));
-      cb.size += sizeof(i);
+      memcpy(cb.code+cb._code_size, &i, sizeof(i));
+      cb._code_size += sizeof(i);
       return cb;
     }
 
     CodeBuilder& putU64(u64 i) {
       UpsizeIfNeeds(sizeof(i));
-      memcpy(code+size, &i, sizeof(i));
-      size += sizeof(i);
+      memcpy(code+_code_size, &i, sizeof(i));
+      _code_size += sizeof(i);
       return *this;
     }
 
     friend CodeBuilder& operator<<(CodeBuilder& cb, Instruction i) {
       cb.UpsizeIfNeeds(sizeof(i));
-      cb.code[cb.size++] = i;
+      cb.code[cb._code_size++] = i;
       return cb;
     }
     friend CodeBuilder& operator<<(CodeBuilder& cb, int i) {
       cb.UpsizeIfNeeds(sizeof(i));
-      memcpy(cb.code+cb.size, &i, sizeof(i));
-      cb.size += sizeof(i);
+      memcpy(cb.code+cb._code_size, &i, sizeof(i));
+      cb._code_size += sizeof(i);
       return cb;
     }
     friend CodeBuilder& operator<<(CodeBuilder& cb, size_t i) {
       cb.UpsizeIfNeeds(sizeof(i));
-      memcpy(cb.code+cb.size, &i, sizeof(i));
-      cb.size += sizeof(i);
+      memcpy(cb.code+cb._code_size, &i, sizeof(i));
+      cb._code_size += sizeof(i);
       return cb;
     }
     
     template<typename K>
     CodeBuilder& insert(K& value) {
       UpsizeIfNeeds(sizeof(value));
-      memcpy(code+size, &value, sizeof(value));
-      size += sizeof(value);
+      memcpy(code+_code_size, &value, sizeof(value));
+      _code_size += sizeof(value);
       return *this;
     }
 
     friend CodeBuilder& operator<<(CodeBuilder& cb, untyped_pair i) {
       cb.UpsizeIfNeeds(i.size);
-      memcpy(cb.code+cb.size, &i.data, i.size);
-      cb.size += i.size;
+      memcpy(cb.code+cb._code_size, &i.data, i.size);
+      cb._code_size += i.size;
       return cb;
     }
 
     friend CodeBuilder& operator>>(CodeBuilder& cb, untyped_pair i) {
       cb.UpsizeIfNeeds(i.size);
-      memmove(cb.code+i.size, cb.code, cb.size);
+      memmove(cb.code+i.size, cb.code, cb._code_size);
       memcpy(cb.code, &i.data, i.size);
-      cb.size += i.size;
+      cb._code_size += i.size;
       return cb;
     }
 
@@ -1690,7 +1759,7 @@ namespace Virtual {
 
     Code* operator*() {
       Code* c = new Code();
-      c->capacity   = size;
+      c->capacity   = _code_size;
       c->playground = (Instruction*)(code);
       c->data_size  = _data_size;
       c->data       = data;
@@ -1698,7 +1767,7 @@ namespace Virtual {
     }
     Code operator*(int) {
       Code c;
-      c.capacity    = size;
+      c.capacity    = _code_size;
       c.playground  = (Instruction*)code;
       c.data_size   = _data_size;
       c.data        = data;
@@ -1706,8 +1775,8 @@ namespace Virtual {
     }
 
     byte* at(int idx) {
-      u32 real_idx = (size + idx) % size;
-      MewAssert(real_idx < size);
+      u32 real_idx = (_code_size + idx) % _code_size;
+      MewAssert(real_idx < _code_size);
       return (code+real_idx);
     }
 
