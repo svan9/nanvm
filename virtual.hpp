@@ -104,6 +104,7 @@ namespace Virtual {
     Instruction_PUTI,
     Instruction_PUTS,
     Instruction_GETCH,
+    Instruction_GBCH,
     Intruction_GetVM,
     Intruction_GetIPTR,
     Instruction_MOVRDI,
@@ -1122,6 +1123,12 @@ namespace Virtual {
     a = mew::wait_char();
   }
   
+  void VM_GBCH(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    int& a = VM_GetArg(vm).getInt();
+    a = getchar();
+  }
+  
   // 
   void VM_LM(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
@@ -1306,6 +1313,9 @@ namespace Virtual {
       } break;
       case Instruction_GETCH: {
         VM_Getch(vm);
+      } break;
+      case Instruction_GBCH: {
+        VM_GBCH(vm);
       } break;
       case Instruction_MOVRDI: {
         VM_MovRDI(vm);
