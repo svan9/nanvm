@@ -1,8 +1,8 @@
 // #define MEW_NOTUSE_THROWS
 #include <iostream>
-#include "mewall.h"
+#include "mewall"
 #include "virtual.hpp"
-#include "mewcolors.hpp"
+#include "mewcolors"
 #ifdef _WIN32
 
 #include <windows.h>

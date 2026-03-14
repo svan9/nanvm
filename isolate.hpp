@@ -3,8 +3,8 @@
 
 #include "mewlib.h"
 #include "mewtypes.h"
-#include "mewmap.hpp"
-#include "mewstack.hpp"
+#include "mewmap"
+#include "mewstack"
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -53,7 +53,7 @@ namespace Virtual {
 		bool Close(u32 descriptor) {
 			if (m_is_isolate) {
 				MewUserAssert(descriptor < m_opened_files.count(), "invalid descriptor");
-				m_opened_files.erase(descriptor);
+				m_opened_files.erase((u64)descriptor);
 				return true;
 			} 
 			FILE* fp = _fdopen(descriptor, "rb+");
@@ -155,7 +155,7 @@ namespace Virtual {
 		}
 
 		static void CreateFileIfNotExists(const char* path) {
-			if (IsExist(path)) return;
+			if (mew::is_exists(path)) return;
 			FILE* fp = fopen(path, "wb");
 			if (fp != nullptr) {
 				fclose(fp);

@@ -12,15 +12,12 @@
 #include <windows.h>
 #endif
 #include "mewlib.h"
-// #include "mewall.hpp"
 #include "mewall"
-#include "mewmath.hpp"
+#include "mewmath"
 #include "mewpack"
 #include "mewtypes.h"
-// #include "mewdll.hpp"
 #include "isolate.hpp"
-#include "mewallocator.hpp"
-// todo replace to tiny
+#include "mewallocator"
 #include <variant>
 
 #pragma region NOTES
@@ -39,64 +36,6 @@
 #else
     #include <dlfcn.h>
 #endif
-
-class DynamicLibrary {
-private:
-#ifdef _WIN32
-  HMODULE handle_;
-#else
-  void* handle_;
-#endif
-
-public:
-  DynamicLibrary() : handle_(nullptr) {}
-  
-  ~DynamicLibrary() {
-    close();
-  }
-  
-  bool open(const char* libraryPath) {
-#ifdef _WIN32
-    handle_ = LoadLibraryA(libraryPath);
-#else
-    handle_ = dlopen(libraryPath, RTLD_LAZY);
-#endif
-    return handle_ != nullptr;
-  }
-  
-  void close() {
-    if (handle_) {
-#ifdef _WIN32
-      FreeLibrary(handle_);
-#else
-      dlclose(handle_);
-#endif
-      handle_ = nullptr;
-    }
-  }
-  
-  template<typename T>
-  T getFunction(const char* functionName) {
-    if (!handle_) {
-      return nullptr;
-    }
-    
-#ifdef _WIN32
-    FARPROC proc = GetProcAddress(handle_, functionName);
-    if (!proc) {
-      return nullptr;
-    }
-    return reinterpret_cast<T>(proc);
-#else
-    void* symbol = dlsym(handle_, functionName);
-    if (!symbol) {
-      return nullptr;
-    }
-    return reinterpret_cast<T*>(symbol);
-#endif
-  }
-};
-
 
 namespace Virtual {
   using byte = mew::byte;
@@ -206,26 +145,60 @@ namespace Virtual {
     mew::writeString(file, link.func_name);
   }
 
-  FuncExternalLink Code_ReadDebug(std::ifstream& file) {
-    FuncExternalLink link;
-    file >> link.type;
-    mew::readString(file, (char*)link.lib_name);
-    mew::readString(file, (char*)link.func_name);
-    return link;
-  }
+  // FuncExternalLink Code_ReadDebug(std::ifstream& file) {
+  //   FuncExternalLink link;
+  //   file.read(&(char)link.type, 1);
+  //   mew::readString(file, (char*)link.lib_name);
+  //   mew::readString(file, (char*)link.func_name);
+  //   return link;
+  // }
 
   void Code_SaveToFile(const Code& code, std::ofstream& file) {
-    /* manifest */
-    VM_MANIFEST_FLAGS mflags = code.cme.flags;
-    mew::writeBytes(file, (uint)VIRTUAL_VERSION);
-    mew::writeBytes(file, mflags, sizeof(uint));
-    /* data */
-    mew::writeArray(file, code.playground, code.capacity);
-    mew::writeArray(file, code.data, code.data_size);
-    /* debug */
-    if (mflags.has_debug) {
-      mew::writeStack(file, code.cme.extern_links, Code_WriteDebug);
+    // version
+    u64 version = VIRTUAL_VERSION;
+    file.write((char*)&version, sizeof(u64));
+    
+    // flags
+    file.write((char*)&code.cme.flags, sizeof(VM_MANIFEST_FLAGS));
+    
+    // playground
+    file.write((char*)&code.capacity, sizeof(u64));
+    file.write((char*)code.playground, code.capacity * sizeof(Instruction));
+    
+    // data
+    file.write((char*)&code.data_size, sizeof(u64));
+    if (code.data_size > 0 && code.data != nullptr) {
+        file.write((char*)code.data, code.data_size);
     }
+  }
+
+  Code* Code_LoadFromFile(std::ifstream& file) {
+    // version
+    u64 file_version = 0;
+    file.read((char*)&file_version, sizeof(u64));
+    if (file_version != VIRTUAL_VERSION) {
+        MewWarn("file version not support (%i != %i)", file_version, VIRTUAL_VERSION);
+        return nullptr;
+    }
+
+    Code* code = new Code();
+
+    // flags
+    file.read((char*)&code->cme.flags, sizeof(VM_MANIFEST_FLAGS));
+
+    // playground
+    file.read((char*)&code->capacity, sizeof(u64));
+    code->playground = new Instruction[code->capacity];
+    file.read((char*)code->playground, code->capacity * sizeof(Instruction));
+
+    // data
+    file.read((char*)&code->data_size, sizeof(u64));
+    if (code->data_size > 0) {
+        code->data = new byte[code->data_size];
+        file.read((char*)code->data, code->data_size);
+    }
+
+    return code;
   }
 
   void Code_SaveToFile(const Code& code, const std::filesystem::path& path) {
@@ -242,27 +215,7 @@ namespace Virtual {
     if (!__path.is_absolute()) {
       __path = std::filesystem::absolute(__path.lexically_normal());
     }
-    Code_SaveFromFile(code, __path);
-  }
-
-  Code* Code_LoadFromFile(std::ifstream& file) {
-    /* manifest */
-    int file_version = mew::readUInt64(file);
-    if (file_version != VIRTUAL_VERSION) {
-      MewWarn("file version not support (%i != %i)", file_version, VIRTUAL_VERSION); 
-      return nullptr;
-    }
-    Code* code = new Code();
-    VM_MANIFEST_FLAGS& mflags = code->cme.flags;
-    mew::readBytes(file, mflags);
-    /* data */
-    code->capacity = mew::readArray(file, code->playground);
-    code->data_size = mew::readArray(file, code->data);
-    /* debug */
-    if (code->cme.flags.has_debug) {
-      mew::readStack(file, code->cme.extern_links, Code_ReadDebug);
-    }
-    return code;
+    Code_SaveToFile(code, __path);
   }
 
   Code* Code_LoadFromFile(const std::filesystem::path& path) {
@@ -389,9 +342,9 @@ namespace Virtual {
   u64 VM_OpenDll(VirtualMachine& vm, const char* name) {
     handle_t handle_;
     #ifdef _WIN32
-      handle_ = LoadLibraryA(libraryPath);
+      handle_ = LoadLibraryA(name);
     #else
-      handle_ = dlopen(libraryPath, RTLD_LAZY);
+      handle_ = dlopen(name, RTLD_LAZY);
     #endif
     MewForUserAssert(handle_ != nullptr, "cant open library (%s)", name);
     return vm.dll_handles.push(handle_);
@@ -413,9 +366,9 @@ namespace Virtual {
     if (it != vm.dll_pipes.end()) {return it->second;}
     MewForUserAssert(vm.dll_handles.has(dll_idx), "cant find library by identifier(%i), maybe library wasnt loaded", dll_idx);
 #ifdef _WIN32
-    FARPROC proc = GetProcAddress(handle_, functionName);
+    FARPROC proc = GetProcAddress(vm.dll_handles[dll_idx], name);
 #else
-    void* proc = dlsym(handle_, functionName);
+    void* proc = dlsym(vm.dll_handles[dll_idx], name);
 #endif
     if (!proc) {
       MewWarn("cant find function(%s) from library\n", name);
@@ -430,16 +383,6 @@ namespace Virtual {
     u64 size;
   };
 
-  u64 Code_CountAData(Code& code) {
-    if (code.adata == nullptr) { return 0; }
-    Code_AData* adata = (Code_AData*)code.adata;
-    u64 size_couter = 0;
-    for (int i = 0; i < code.adata_count; ++i) {
-      auto& local = adata[i];
-      size_couter += local.size;
-    }
-    return size_couter;
-  }
   
   void a() {
     sizeof(VirtualMachine);
@@ -461,18 +404,17 @@ namespace Virtual {
     if (vm.memory != nullptr) {
       free(vm.memory);
     }
-    vm.memory = new byte[VM_ALLOC_ALIGN];
+    vm.memory = mew::mem::alloc(VM_ALLOC_ALIGN);
     memset(vm.memory, Instruction_NONE, VM_ALLOC_ALIGN);
     vm.capacity = VM_ALLOC_ALIGN;
   }
 
   void Alloc(VirtualMachine& vm, Code& code) {
-    u64 adata_count = Code_CountAData(code);
-    u64 size = __VM_ALIGN(code.capacity+code.data_size+adata_count, VM_ALLOC_ALIGN);
+    u64 size = __VM_ALIGN(code.capacity+code.data_size, VM_ALLOC_ALIGN);
     if ((size - code.capacity - code.data_size) <= 0) {
       size += VM_MINHEAP_ALIGN;
     }
-    vm.memory = new byte[size];
+    vm.memory = mew::mem::alloc(size);
     memset(vm.memory, Instruction_NONE, size);
     vm.capacity = size;
   }
@@ -485,188 +427,14 @@ namespace Virtual {
 
   void LoadMemory(VirtualMachine& vm, Code& code) {
     memcpy(vm.memory, code.playground, code.capacity);
-    // todo load from .nlib file 
-    for (int i = 0; i < code.cme.libs.size(); ++i) {
-      Code* lib = Code_LoadFromFile(code.cme.libs.at(i));
-      vm.libs.push(lib);
-    }
+    // // todo load from .nlib file 
+    // for (int i = 0; i < code.cme.libs.size(); ++i) {
+    //   Code* lib = Code_LoadFromFile(code.cme.libs.at(i));
+    //   vm.libs.push(lib);
+    // }
   }
 
-  void VM_ManualPush(VirtualMachine& vm, u32 x) {
-    vm.stack.push(x);
-  }
-
-  void VM_Push(VirtualMachine& vm, byte head_byte, u32 number) {
-    switch (head_byte) {
-      case 0:
-      case Instruction_FLT:
-      case Instruction_NUM: {
-        vm.stack.push(number);
-      } break;
-      case Instruction_MEM: {
-        MewUserAssert(vm.heap+number < vm.end, "out of memory");
-        byte* pointer = vm.heap+number;
-        u32 x; memcpy(&x, pointer, sizeof(x));
-        vm.stack.push(x, vm.rdi);
-      } break;
-      case Instruction_REG: {
-        MewUserAssert(vm.heap+number < vm.end, "out of memory");
-        vm.stack.push(number, vm.rdi);
-      } break;
-      case Instruction_ST: {
-        MewUserAssert(vm.stack.has(number), "out of stack");
-        vm.stack.push(vm.stack.at((int)number), vm.rdi);
-      } break;
-      default: MewNot(); break;
-    }
-  }
-
-  byte* VM_GetReg(VirtualMachine& vm, u64* size = nullptr) {
-    Virtual::VM_RegType rtype = (Virtual::VM_RegType)(*vm.begin++);
-    byte ridx = *vm.begin++;
-    return vm.getRegister(rtype, ridx);
-  }
-
-  void VM_Push(VirtualMachine& vm) {
-    vm.debug.last_fn = (char*)__func__;
-    Instruction head_byte = (Instruction)*vm.begin++;
-    switch (head_byte) {
-      case 0:
-      case Instruction_FLT:
-      case Instruction_NUM: {
-        u32 number = 0;
-        memcpy(&number, vm.begin, sizeof(number));
-        vm.stack.push(number);
-        vm.begin += sizeof(number);
-      } break;
-      case Instruction_STRUCT: {
-        auto arg = VM_GetArg(vm);
-        vm.stack.push_array(arg.data, arg.size);
-      } break;
-      case Instruction_BYTE: { // <value:8>
-        u8 number = 0;
-        memcpy(&number, vm.begin, sizeof(number));
-        vm.stack.push(number);
-        vm.begin += sizeof(number);
-      } break;
-      case Instruction_MEM: { // <offset:32>
-        u32 number = 0;
-        memcpy(&number, vm.begin, sizeof(number));
-        MewUserAssert(vm.heap+number < vm.end, "out of memory");
-        byte* pointer = vm.heap+number;
-        u32 x; memcpy(&x, pointer, sizeof(x));
-        vm.stack.push(x);
-        vm.begin += sizeof(number);
-      } break;
-      case Instruction_REG: { 
-        u64 size;
-        byte* reg = VM_GetReg(vm, &size);
-        MewUserAssert(reg != nullptr, "invalid register");
-        vm.stack.push((u32)*reg);
-        if (size == 8) {
-          vm.stack.push((u32)*(reg+sizeof(u32)));
-        }
-      } break;
-      case Instruction_ST: { // offset:4 + arg
-        int offset = 0; // byte offset
-        GrabFromVM(offset);
-        MewUserAssert(vm.stack.size() < offset, "out of stack");
-        auto arg = VM_GetArg(vm);
-        MewUserAssert(0 < vm.stack.size()-offset && vm.stack.size() < offset+arg.size, "out of stack");
-        byte* value = vm.stack.begin()+(vm.stack.size() - offset - 1);
-        memcpy(value, arg.data, arg.size);
-      } break;
-      default: MewNot(); break;
-    }
-  }
-  
-  void VM_Pop(VirtualMachine& vm) {
-    vm.debug.last_fn = (char*)__func__;
-    MewAssert(!vm.stack.empty());
-    vm.stack.asc_pop(1);
-  }
-
-  void VM_RPop(VirtualMachine& vm) {
-    vm.debug.last_fn = (char*)__func__;
-    MewAssert(!vm.stack.empty());
-    u64 size;
-    u8* raw_reg = VM_GetReg(vm, &size);
-    if (size == 4) {
-      u32* value = (u32*)&vm.stack.top(vm.rdi+sizeof(u32));
-      u32* reg = (u32*)raw_reg;
-      *reg = *value;
-      vm.stack.asc_pop(sizeof(u32));
-    } else if (size == 8) {
-      u64* value = (u64*)&vm.stack.top(vm.rdi+sizeof(u64));
-      u64* reg = (u64*)raw_reg;
-      *reg = *value;
-      vm.stack.asc_pop(sizeof(u64));
-    }
-  }
-  
-  void VM_StackTop(VirtualMachine& vm, byte type, u32* x, byte** mem = nullptr) {
-    switch (type) {
-      case 0:
-      case Instruction_FLT:
-      case Instruction_ST:
-      case Instruction_NUM: {
-        MewUserAssert(!vm.stack.empty(), "stack is empty");
-        u32 _top = vm.stack.top(vm.rdi);
-        memmove(x, &_top, sizeof(_top));
-      } break;
-      case Instruction_MEM: {
-        MewUserAssert(!vm.stack.empty(), "stack is empty");
-        u32 _top = vm.stack.top(vm.rdi);
-        u32 offset = _top;
-        MewUserAssert(vm.heap+offset < vm.end, "out of memory");
-        byte* pointer = vm.heap+offset;
-        if (mem != nullptr) {
-          *mem = pointer;
-        }
-        memmove(x, pointer, sizeof(*x));
-      } break;
-
-      default: MewNot(); break;
-    }
-  }
-
-  void VM_SwitchContext(VirtualMachine& vm, Code* code) {
-    vm.flags.in_neib_ctx = true;
-  }
-
-  void VM_ManualCall(VirtualMachine& vm, int libIDX, const char* fname) {
-    Code* lib = vm.libs.at(libIDX);
-    u64 offset = lib->find_label(fname);
-    MewUserAssert(offset != -1, "undefined function");
-    vm.begin_stack.push(vm.begin);
-    vm.begin = (byte*)lib->playground+offset;
-    VM_SwitchContext(vm, lib);
-  }
-
-  void VM_Call(VirtualMachine& vm) {
-    u64 offset;
-    GrabFromVM(offset);
-    vm.begin_stack.push(vm.begin);
-    vm.begin = vm.memory + offset;
-    MewUserAssert(vm.begin <= vm.end, "segmentation fault, cant call out of code");
-  }
-
-  void VM_MathBase(VirtualMachine& vm, u32* x, u32* y, byte** mem = nullptr) {
-    byte type_x = *vm.begin++;
-    byte type_y = *vm.begin++;
-    vm.rdi += sizeof(u32);
-    VM_StackTop(vm, type_x, x, mem);
-    vm.rdi -= sizeof(u32);
-    VM_StackTop(vm, type_y, y);
-  }
-
-  int VM_GetOffset(VirtualMachine& vm) {
-    int offset;
-    memcpy(&offset, vm.begin, sizeof(int)); vm.begin += sizeof(int);
-    return offset/4;
-  }
-
-#pragma region VM_ARG 
+  #pragma region VM_ARG 
   typedef struct {
     VM_RegType type;
     byte idx;
@@ -913,7 +681,7 @@ namespace Virtual {
         s32 num;
         GrabFromVM(num);
         VM_ARG arg;
-        arg.data = (byte*)num;
+        arg.data = itoba(num);
         arg.type = type;
         arg.size = sizeof(num);
         return arg;
@@ -938,6 +706,173 @@ namespace Virtual {
   }
 
 #pragma endregion VM_ARG
+
+
+  void VM_ManualPush(VirtualMachine& vm, u32 x) {
+    vm.stack.push(x);
+  }
+
+  void VM_Push(VirtualMachine& vm, byte head_byte, u32 number) {
+    switch (head_byte) {
+      case 0:
+      case Instruction_FLT:
+      case Instruction_NUM: {
+        vm.stack.push(number);
+      } break;
+      case Instruction_MEM: {
+        MewUserAssert(vm.heap+number < vm.end, "out of memory");
+        byte* pointer = vm.heap+number;
+        u32 x; memcpy(&x, pointer, sizeof(x));
+        vm.stack.push(x, vm.rdi);
+      } break;
+      case Instruction_REG: {
+        MewUserAssert(vm.heap+number < vm.end, "out of memory");
+        vm.stack.push(number, vm.rdi);
+      } break;
+      case Instruction_ST: {
+        MewUserAssert(vm.stack.size() >= number, "out of stack");
+        vm.stack.push(vm.stack.at((int)number), vm.rdi);
+      } break;
+      default: MewNot(); break;
+    }
+  }
+
+  byte* VM_GetReg(VirtualMachine& vm, u64* size = nullptr) {
+    Virtual::VM_RegType rtype = (Virtual::VM_RegType)(*vm.begin++);
+    byte ridx = *vm.begin++;
+    return vm.getRegister(rtype, ridx);
+  }
+
+  void VM_Push(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    Instruction head_byte = (Instruction)*vm.begin++;
+    switch (head_byte) {
+      case 0:
+      case Instruction_FLT:
+      case Instruction_NUM: {
+        u32 number = 0;
+        memcpy(&number, vm.begin, sizeof(number));
+        vm.stack.push(number);
+        vm.begin += sizeof(number);
+      } break;
+      case Instruction_STRUCT: {
+        auto arg = VM_GetArg(vm);
+        vm.stack.push_array(arg.data, arg.size);
+      } break;
+      case Instruction_BYTE: { // <value:8>
+        u8 number = 0;
+        memcpy(&number, vm.begin, sizeof(number));
+        vm.stack.push(number);
+        vm.begin += sizeof(number);
+      } break;
+      case Instruction_MEM: { // <offset:32>
+        u32 number = 0;
+        memcpy(&number, vm.begin, sizeof(number));
+        MewUserAssert(vm.heap+number < vm.end, "out of memory");
+        byte* pointer = vm.heap+number;
+        u32 x; memcpy(&x, pointer, sizeof(x));
+        vm.stack.push(x);
+        vm.begin += sizeof(number);
+      } break;
+      case Instruction_REG: { 
+        u64 size;
+        byte* reg = VM_GetReg(vm, &size);
+        MewUserAssert(reg != nullptr, "invalid register");
+        vm.stack.push((u32)*reg);
+        if (size == 8) {
+          vm.stack.push((u32)*(reg+sizeof(u32)));
+        }
+      } break;
+      case Instruction_ST: { // offset:4 + arg
+        int offset = 0; // byte offset
+        GrabFromVM(offset);
+        MewUserAssert(vm.stack.size() < offset, "out of stack");
+        auto arg = VM_GetArg(vm);
+        MewUserAssert(0 < vm.stack.size()-offset && vm.stack.size() < offset+arg.size, "out of stack");
+        byte* value = vm.stack.begin()+(vm.stack.size() - offset - 1);
+        memcpy(value, arg.data, arg.size);
+      } break;
+      default: MewNot(); break;
+    }
+  }
+  
+  void VM_Pop(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    MewAssert(!vm.stack.empty());
+    vm.stack.asc_pop(1);
+  }
+
+  void VM_RPop(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    MewAssert(!vm.stack.empty());
+    u64 size;
+    u8* raw_reg = VM_GetReg(vm, &size);
+    if (size == 4) {
+      u32* value = (u32*)&vm.stack.top(vm.rdi+sizeof(u32));
+      u32* reg = (u32*)raw_reg;
+      *reg = *value;
+      vm.stack.asc_pop(sizeof(u32));
+    } else if (size == 8) {
+      u64* value = (u64*)&vm.stack.top(vm.rdi+sizeof(u64));
+      u64* reg = (u64*)raw_reg;
+      *reg = *value;
+      vm.stack.asc_pop(sizeof(u64));
+    }
+  }
+  
+  void VM_StackTop(VirtualMachine& vm, byte type, u32* x, byte** mem = nullptr) {
+    switch (type) {
+      case 0:
+      case Instruction_FLT:
+      case Instruction_ST:
+      case Instruction_NUM: {
+        MewUserAssert(!vm.stack.empty(), "stack is empty");
+        u32 _top = vm.stack.top(vm.rdi);
+        memmove(x, &_top, sizeof(_top));
+      } break;
+      case Instruction_MEM: {
+        MewUserAssert(!vm.stack.empty(), "stack is empty");
+        u32 _top = vm.stack.top(vm.rdi);
+        u32 offset = _top;
+        MewUserAssert(vm.heap+offset < vm.end, "out of memory");
+        byte* pointer = vm.heap+offset;
+        if (mem != nullptr) {
+          *mem = pointer;
+        }
+        memmove(x, pointer, sizeof(*x));
+      } break;
+
+      default: MewNot(); break;
+    }
+  }
+
+  void VM_SwitchContext(VirtualMachine& vm, Code* code) {
+    vm.flags.in_neib_ctx = true;
+  }
+
+  void VM_Call(VirtualMachine& vm) {
+    u64 offset;
+    GrabFromVM(offset);
+    vm.begin_stack.push(vm.begin);
+    vm.begin = vm.memory + offset;
+    MewUserAssert(vm.begin <= vm.end, "segmentation fault, cant call out of code");
+  }
+
+  void VM_MathBase(VirtualMachine& vm, u32* x, u32* y, byte** mem = nullptr) {
+    byte type_x = *vm.begin++;
+    byte type_y = *vm.begin++;
+    vm.rdi += sizeof(u32);
+    VM_StackTop(vm, type_x, x, mem);
+    vm.rdi -= sizeof(u32);
+    VM_StackTop(vm, type_y, y);
+  }
+
+  int VM_GetOffset(VirtualMachine& vm) {
+    int offset;
+    memcpy(&offset, vm.begin, sizeof(int)); vm.begin += sizeof(int);
+    return offset/4;
+  }
+
 
   void VM_MovRDI(VirtualMachine& vm) {
     int offset = VM_GetOffset(vm);
@@ -1427,9 +1362,7 @@ namespace Virtual {
     if (code.data != nullptr) {
       memcpy(vm.heap, code.data, code.data_size*sizeof(*code.data));
     }
-    if (code.adata != nullptr) {
-      memset(vm.heap+code.data_size, 0, vm.capacity-(code.capacity+code.data_size));
-    }
+  
     while (vm.begin < vm.end && vm.status != VM_Status_Ret) {
       ++vm.process_cycle; RunLine(vm);
     }
@@ -1529,18 +1462,18 @@ namespace Virtual {
         return vm.stack.top();
       }
       ++vm.process_cycle;
-      try {
+      // try {
         RunLine(vm);
-      } catch(std::exception& e) {
-        u64 cursor = vm.capacity - (u64)(vm.end-vm.begin);
-        for (int i = 0; i < code.cme.debug.size(); ++i) {
-          if (code.cme.debug[i].cursor >= cursor) {
-            fprintf(vm.std_out, "\n[DEBUG_ERROR] at (%i) in (%s)\n", code.cme.debug[i].line, vm.debug.last_fn);
-            vm.status = VM_Status_Error;
-            break;
-          }
-        }
-      }
+      // } catch(std::exception& e) {
+      //   u64 cursor = vm.capacity - (u64)(vm.end-vm.begin);
+      //   for (int i = 0; i < code.cme.debug.size(); ++i) {
+      //     if (code.cme.debug[i].cursor >= cursor) {
+      //       fprintf(vm.std_out, "\n[DEBUG_ERROR] at (%i) in (%s)\n", code.cme.debug[i].line, vm.debug.last_fn);
+      //       vm.status = VM_Status_Error;
+      //       break;
+      //     }
+      //   }
+      // }
       return -1;
     }
   };
@@ -1555,17 +1488,19 @@ namespace Virtual {
   private:
     u64 capacity, _code_size, _data_size = 0;
     mew::stack<u64> _adatas;
-    byte* code = nullptr, *data = nullptr;
+    byte* code = nullptr;
+    byte* data = nullptr;
     u64 stack_head = 0;
   public:
-    CodeBuilder(): capacity(alloc_size), _code_size(0), 
-      code((byte*)realloc(NULL, alloc_size)), _data_size(0) { memset(code, 0, alloc_size); }
+    CodeBuilder()
+      : capacity(alloc_size), _code_size(0), _data_size(0), code(mew::mem::alloc(alloc_size))
+      { memset(code, 0, alloc_size); }
 
     CodeBuilder(Code* code)
       : capacity(code->capacity), 
         _code_size(code->capacity), 
         _data_size(code->data_size), 
-        code(code->playground),
+        code((byte*)code->playground),
         data(code->data)
       { }
     
@@ -1604,16 +1539,17 @@ namespace Virtual {
 
     inline u64 putAtCode(u64 idx, u64 val) {
       MewUserAssert(idx+sizeof(val) <= _code_size, "out of code");
-      memcpy(code, &val, sizeof(val));
+      memcpy(code + idx, &val, sizeof(val));  // было: code, надо: code + idx
       return cursor();
     }
     
     inline u64 insertAtCode(u64 idx, byte* val, u64 size) {
-      u8* buffer = new u8[size+_code_size];
+      MewAssert(idx <= _code_size);
+      u8* buffer = mew::mem::alloc(size+_code_size);
       memcpy(buffer, code, idx);
       memcpy(buffer+idx, val, size);
       memcpy(buffer+idx+size, code+idx, _code_size - idx);
-      delete code;
+      delete[] code;
       code = buffer;
       _code_size += size;
       return cursor();
@@ -1669,7 +1605,8 @@ namespace Virtual {
     }
     
     void Upsize(u64 _size = alloc_size) {
-      byte* __temp_p = (byte*)realloc(code, capacity+_size);
+      byte* __temp_p = mew::mem::realloc(code, capacity, capacity+_size);
+      MewAssert(__temp_p);
       code = __temp_p;
       capacity += _size;
     }
@@ -1682,7 +1619,8 @@ namespace Virtual {
         
     void AddData(byte* row, u64 size) {
       u64 __new_size = _data_size+size;
-      data = (byte*)realloc(data, __new_size);
+      data = mew::mem::realloc(data, _data_size, __new_size);
+      MewAssert(data);
       memcpy(data+_data_size, row, size);
       _data_size = __new_size;
     }
@@ -1753,6 +1691,15 @@ namespace Virtual {
       return cb;
     }
 
+    void concat(CodeBuilder& other) {
+      UpsizeIfNeeds(other._code_size);
+      memcpy(code+_code_size, other.code, other._code_size);
+      _code_size += other._code_size;
+      if (other.data != nullptr) {
+        AddData(other.data, other._data_size);
+      }
+    }
+
     void push_adata(u64 size) {
       _adatas.push(size);
     }
@@ -1785,7 +1732,7 @@ namespace Virtual {
     }
 
     void force_data(u32 _size) {
-      byte* _ndata = new byte[_data_size+_size];
+      byte* _ndata = mew::mem::alloc(_data_size+_size);
       memcpy(_ndata, data, _data_size);
       _data_size += _size;
       data = _ndata;
@@ -1810,7 +1757,7 @@ namespace Tests {
       builder << Instruction_EXIT;
       builder += "hellow word";
       Code* code = *builder;
-      Code_SaveFromFile(*code, "./hellow_word.nb");
+      Code_SaveToFile(*code, "./hellow_word.nb");
       // printf("[%u|%u]\n", code->capacity, code->data_size);
       Execute("./hellow_word.nb");
     } catch (std::exception e) {
