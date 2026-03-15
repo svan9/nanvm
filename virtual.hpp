@@ -105,9 +105,13 @@ namespace Virtual {
     Instruction_PUTS,
     Instruction_GETCH,
     Instruction_GBCH,
+    Instruction_WTM,
     Intruction_GetVM,
     Intruction_GetIPTR,
-    Instruction_MOVRDI,
+
+    Instruction_SRDI,
+    Instruction_ARDI,
+
     Instruction_DCALL, // dynamic library function call ~!see notes
   };
 
@@ -260,7 +264,7 @@ namespace Virtual {
 
   template<u64 size>
   struct VM_Register {
-    byte data[size];
+    byte data[size] = {0};
   };
   
   enum struct VM_RegType: byte {
@@ -310,7 +314,7 @@ namespace Virtual {
     } flags;                                    // 1byte
     byte _pad0[1];
     mew::stack<u8, mew::MidAllocator<u8>> stack;                 // 24byte
-    u64 rdi = 0;
+    s32 rdi = 0;
     mew::stack<byte *, mew::MidAllocator<byte*>> begin_stack;        // 24byte             // 24byte
     mew::stack<Code*> libs;                 // 24byte
     mew::stack<handle_t> dll_handles;
@@ -321,16 +325,16 @@ namespace Virtual {
       MewUserAssert(idx < 5, "undefined register idx");
       switch (rt) {
         case VM_RegType::R: 
-          if (!size) {*size = 4;}
+          if (size) {*size = 4;}
           return this->_r[idx].data;     
         case VM_RegType::RX: 
-          if (!size) {*size = 8;}
+          if (size) {*size = 8;}
           return this->_rx[idx].data;
         case VM_RegType::FX: 
-          if (!size) {*size = 4;}
+          if (size) {*size = 4;}
           return this->_fx[idx].data;
         case VM_RegType::DX: 
-          if (!size) {*size = 8;}
+          if (size) {*size = 8;}
           return this->_dx[idx].data;
         case VM_RegType::RDI:
           return (byte*)&this->rdi;
@@ -452,6 +456,9 @@ namespace Virtual {
     int& getInt() {
       return (int&)(*this->data);
     }
+    u64& getU64() {
+      return (u64&)(*this->data);
+    }
     lli& getLong() {
       return (lli&)(*this->data);
     }
@@ -461,8 +468,8 @@ namespace Virtual {
     double& getDouble() {
       return (double&)(*this->data);
     }
-    byte getByte() {
-      return (byte)(*this->data);
+    byte& getByte() {
+      return (byte&)(*this->data);
     }
 
     byte* getMem() {
@@ -650,15 +657,18 @@ namespace Virtual {
     return a;
   }
 
-  VM_ARG VM_GetArg(VirtualMachine& vm) {
+  VM_ARG VM_GetArg(VirtualMachine& vm, byte* _type = nullptr) {
     byte type = *vm.begin++;
+    if (_type) {
+      *_type = type;
+    }
     switch (type) {
       case Instruction_ST: {
         u32 offset;
         GrabFromVM(offset);
         VM_ARG arg;
         MewUserAssert(vm.stack.size() < offset, "out of stack");
-        byte* num = vm.stack.begin()+(vm.stack.size() - 1 - offset);
+        byte* num = vm.stack.begin()+(vm.stack.size() - 1 - offset + vm.rdi);
         arg.data = num;
         arg.type = type;
         arg.size = sizeof(u32);
@@ -682,7 +692,8 @@ namespace Virtual {
         s32 num;
         GrabFromVM(num);
         VM_ARG arg;
-        arg.data = itoba(num);
+        auto* nn = new s32(num);
+        arg.data = (byte*)nn;
         arg.type = type;
         arg.size = sizeof(num);
         return arg;
@@ -852,6 +863,7 @@ namespace Virtual {
   }
 
   void VM_Call(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
     u64 offset;
     GrabFromVM(offset);
     vm.begin_stack.push(vm.begin);
@@ -875,10 +887,6 @@ namespace Virtual {
   }
 
 
-  void VM_MovRDI(VirtualMachine& vm) {
-    int offset = VM_GetOffset(vm);
-    vm.rdi = offset;
-  }
 
   void VM_Add(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
@@ -988,9 +996,11 @@ namespace Virtual {
 
   void VM_Test(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    u32 x, y;
+    // u32 x, y;
     vm.test = {0};
-    VM_MathBase(vm, (u32*)&x, (u32*)&y);
+    s32& x = VM_GetArg(vm).getInt();
+    s32& y = VM_GetArg(vm).getInt();
+    // VM_MathBase(vm, (u32*)&x, (u32*)&y);
     int result = memcmp(&x, &y, sizeof(x));
     if (result > 0) {
       vm.test.more = 1;
@@ -1064,9 +1074,21 @@ namespace Virtual {
 
   void VM_Mov(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    auto a = VM_GetArg(vm);
-    auto b = VM_GetArg(vm);
-    VM_ARG::mov(a, b);
+    auto arg_a = VM_GetArg(vm);
+    auto arg_b = VM_GetArg(vm);
+    auto a = arg_a.getMem();
+    auto b = arg_a.getMem();
+    u64 size = mew::min(arg_a.size, arg_b.size);
+    if (arg_a.type == Instruction_REG ) {
+      if (arg_a.size == 8) {
+        if (arg_b.type == Instruction_NUM) {
+          memset(a, 0, 8);
+          memcpy(a+4, b, size);
+        } 
+      }
+    }
+    memcpy(a, b, size);
+    // VM_ARG::mov(a, b);
   }
 
   void VM_Swap(VirtualMachine& vm) {
@@ -1091,9 +1113,8 @@ namespace Virtual {
 
   void VM_Putc(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    wchar_t long_char;
-    memcpy(&long_char, vm.begin, sizeof(wchar_t)); vm.begin+=sizeof(wchar_t);
-    fputwc(long_char, vm.std_out);
+    auto& a = VM_GetArg(vm).getByte();
+    putchar(a);
   }
   
   void VM_Puti(VirtualMachine& vm) {
@@ -1107,29 +1128,67 @@ namespace Virtual {
 
   void VM_Puts(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    u64 offset;
-    GrabFromVM(offset);
-    MewUserAssert(vm.heap+offset < vm.end, "out of memory");
-    byte* pointer = vm.heap+offset;
-    char* begin = (char*)pointer;
-    while (*(begin) != 0) {
+    if (*vm.begin == Instruction_ST) {
+      ++vm.begin;
+      u8* begin = vm.stack.end() + vm.rdi;
+      u8* end = vm.stack.end();
+      while (begin != end && *begin != '0') {
+        putchar(*(begin++));
+      }
+      return;
+    }
+    auto a = VM_GetArg(vm);
+    MewUserAssert(a.data < vm.end, "out of memory");
+    char* begin = (char*)a.data;
+    char* end = (char*)a.data+a.size;
+    while (begin != end && *begin != '0') {
       putchar(*(begin++));
     }
   }
 
   void VM_Getch(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    int& a = VM_GetArg(vm).getInt();
+    auto& a = VM_GetArg(vm).getInt();
     a = mew::wait_char();
   }
   
   void VM_GBCH(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
-    int& a = VM_GetArg(vm).getInt();
-    a = getchar();
+    auto& a = VM_GetArg(vm).getByte();
+    a = _getch();
+  }
+
+  
+  void VM_SUBRDI(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    auto& offset = VM_GetArg(vm).getU64();
+    vm.rdi = -offset;
+    if (offset+vm.stack.count() <= 0) {
+      vm.rdi = vm.stack.count()-1;
+    }
   }
   
-  // 
+  void VM_ADDRDI(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    auto& offset = VM_GetArg(vm).getU64();
+    vm.rdi = offset;
+    if (offset >= vm.stack.count()) {
+      vm.rdi = vm.stack.count()-1;
+    }
+  }
+
+  void VM_WTM(VirtualMachine& vm) {
+    vm.debug.last_fn = (char*)__func__;
+    byte inst;
+    auto& a = VM_GetArg(vm, &inst).getU64();
+    if (inst == Instruction_ST) {
+      u64 size = vm.stack.count() - vm.rdi;
+      u8* begin = vm.stack.begin() + vm.rdi;
+      u64 heap_size = vm.end-vm.heap;
+      //  = mew::mem::realloc(vm.heap, heap_size, heap_size+size);
+    }
+  }
+  
   void VM_LM(VirtualMachine& vm) {
     vm.debug.last_fn = (char*)__func__;
     auto a = VM_GetArg(vm);
@@ -1317,8 +1376,14 @@ namespace Virtual {
       case Instruction_GBCH: {
         VM_GBCH(vm);
       } break;
-      case Instruction_MOVRDI: {
-        VM_MovRDI(vm);
+      case Instruction_WTM: {
+        VM_WTM(vm);
+      } break;
+      case Instruction_SRDI: {
+        VM_SUBRDI(vm);
+      } break;
+      case Instruction_ARDI: {
+        VM_ADDRDI(vm);
       } break;
       case Instruction_CALL: {
         VM_Call(vm);
@@ -1581,7 +1646,8 @@ namespace Virtual {
       *this
         << Instruction_REG
         << (byte)reg.type
-        << (byte)reg.idx;
+        << (byte)reg.idx
+        ;
       return cursor();
     }
 
